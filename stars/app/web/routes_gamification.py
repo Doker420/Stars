@@ -1,7 +1,8 @@
+import json
 import random
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query, Body, Request
 from pydantic import BaseModel
 from app.database import get_db
@@ -52,6 +53,150 @@ class SpinWheelRequest(BaseModel):
 
 class ClaimTaskRequest(BaseModel):
     user_id: int | str
+
+class OpenCaseRequest(BaseModel):
+    user_id: int | str
+    payment_method: str = "key"
+
+CASES = {
+    "starter": {
+        "id": "starter", "title": "Стартовый сундук", "icon": "🎁",
+        "prices": {"key": 1, "stars": 20, "rub": 25},
+        "rewards": [
+            ("stars", 5, 35), ("stars", 10, 28), ("stars", 25, 12),
+            ("rub", 10, 10), ("spin", 1, 10), ("key", 1, 5),
+        ],
+    },
+    "premium": {
+        "id": "premium", "title": "Золотой сундук", "icon": "👑",
+        "prices": {"key": 3, "stars": 75, "rub": 99},
+        "rewards": [
+            ("stars", 25, 30), ("stars", 50, 25), ("stars", 100, 8),
+            ("rub", 50, 15), ("spin", 2, 12), ("key", 2, 10),
+        ],
+    },
+}
+
+LEVELS = ((0, "Новичок"), (100, "Активный"), (300, "Продвинутый"), (700, "Эксперт"), (1500, "VIP"))
+
+
+def level_info(xp: int) -> dict:
+    current = LEVELS[0]
+    next_level = None
+    for item in LEVELS:
+        if xp >= item[0]:
+            current = item
+        elif next_level is None:
+            next_level = item
+    return {
+        "name": current[1], "xp": xp,
+        "next_xp": next_level[0] if next_level else None,
+        "progress": 100 if not next_level else round((xp - current[0]) / (next_level[0] - current[0]) * 100),
+    }
+
+
+async def log_event(db, user_id: int, name: str, metadata: dict | None = None):
+    await db.execute(
+        "INSERT INTO analytics_events (user_id, event_name, metadata) VALUES (?, ?, ?)",
+        (user_id, name, json.dumps(metadata or {}, ensure_ascii=False)),
+    )
+
+
+@router.get("/game/profile")
+async def game_profile(user_id: int | str = Query(...)):
+    async with get_db() as db:
+        user = await get_user_by_id_or_tg(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        today = date.today()
+        last = date.fromisoformat(user["last_daily_claim"]) if user.get("last_daily_claim") else None
+        can_claim = last != today
+        next_claim = datetime.combine(today + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+        return {
+            "case_keys": user.get("case_keys", 0),
+            "spins_count": user.get("spins_count", 0),
+            "streak": user.get("login_streak", 0),
+            "daily_available": can_claim,
+            "next_daily_at": next_claim.isoformat(),
+            "level": level_info(int(user.get("xp", 0))),
+            "vip": bool(user.get("vip_until") and user["vip_until"] >= today.isoformat()),
+        }
+
+
+@router.post("/daily/claim")
+async def claim_daily(req: ClaimTaskRequest):
+    async with get_db() as db:
+        user = await get_user_by_id_or_tg(db, req.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT * FROM users WHERE id = ?", (user["id"],)) as cur:
+            fresh = dict(await cur.fetchone())
+        today = date.today()
+        last = date.fromisoformat(fresh["last_daily_claim"]) if fresh.get("last_daily_claim") else None
+        if last == today:
+            raise HTTPException(status_code=409, detail="Ежедневная награда уже получена")
+        streak = int(fresh.get("login_streak", 0)) + 1 if last == today - timedelta(days=1) else 1
+        # Every seventh consecutive day also grants a case key.
+        keys = 1 if streak % 7 == 0 else 0
+        await db.execute(
+            "UPDATE users SET login_streak=?, last_daily_claim=?, spins_count=spins_count+1, case_keys=case_keys+?, xp=xp+10 WHERE id=?",
+            (streak, today.isoformat(), keys, fresh["id"]),
+        )
+        await log_event(db, fresh["id"], "daily_claim", {"streak": streak, "keys": keys})
+        await db.commit()
+    return {"success": True, "streak": streak, "spins": 1, "keys": keys, "message": f"День {streak}: +1 спин" + (" и +1 ключ" if keys else "")}
+
+
+@router.get("/cases")
+async def list_cases(user_id: int | str = Query(...)):
+    async with get_db() as db:
+        user = await get_user_by_id_or_tg(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+    public_cases = [{k: v for k, v in case.items() if k != "rewards"} for case in CASES.values()]
+    return {"cases": public_cases, "case_keys": user.get("case_keys", 0), "stars_balance": user.get("stars_balance", 0), "balance": user["balance"]}
+
+
+@router.post("/cases/{case_id}/open")
+async def open_case(case_id: str, req: OpenCaseRequest):
+    case = CASES.get(case_id)
+    if not case or req.payment_method not in case["prices"]:
+        raise HTTPException(status_code=404, detail="Кейс или способ оплаты не найден")
+    async with get_db() as db:
+        user = await get_user_by_id_or_tg(db, req.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT * FROM users WHERE id=?", (user["id"],)) as cur:
+            fresh = dict(await cur.fetchone())
+        price = case["prices"][req.payment_method]
+        field = {"key": "case_keys", "stars": "stars_balance", "rub": "balance"}[req.payment_method]
+        if float(fresh.get(field, 0)) < price:
+            raise HTTPException(status_code=400, detail="Недостаточно средств для открытия сундука")
+        reward_type, reward_value, _ = random.choices(case["rewards"], weights=[r[2] for r in case["rewards"]], k=1)[0]
+        reward_field = {"stars": "stars_balance", "rub": "balance", "spin": "spins_count", "key": "case_keys"}[reward_type]
+        await db.execute(f"UPDATE users SET {field}={field}-? WHERE id=?", (price, fresh["id"]))
+        await db.execute(f"UPDATE users SET {reward_field}={reward_field}+?, xp=xp+15 WHERE id=?", (reward_value, fresh["id"]))
+        await db.execute("INSERT INTO case_openings (user_id, case_id, payment_method, reward_type, reward_value) VALUES (?, ?, ?, ?, ?)", (fresh["id"], case_id, req.payment_method, reward_type, reward_value))
+        await log_event(db, fresh["id"], "case_open", {"case": case_id, "payment": req.payment_method, "reward": reward_type, "value": reward_value})
+        await db.commit()
+    labels = {"stars": "⭐", "rub": "₽", "spin": "спин", "key": "ключ"}
+    return {"success": True, "reward": {"type": reward_type, "value": reward_value, "label": labels[reward_type]}, "message": f"Вы выиграли {reward_value} {labels[reward_type]}!"}
+
+
+@router.get("/referrals/leaderboard")
+async def referral_leaderboard(user_id: int | str = Query(...)):
+    async with get_db() as db:
+        user = await get_user_by_id_or_tg(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        async with db.execute("SELECT u.telegram_id, COALESCE(u.username, 'user') username, COUNT(r.id) referrals FROM users u LEFT JOIN users r ON r.referred_by=u.telegram_id GROUP BY u.id ORDER BY referrals DESC, u.id LIMIT 10") as cur:
+            leaders = [dict(row) for row in await cur.fetchall()]
+        async with db.execute("SELECT COUNT(*) count FROM users WHERE referred_by=?", (user["telegram_id"],)) as cur:
+            own = (await cur.fetchone())["count"]
+    return {"leaders": leaders, "my_referrals": own, "next_goal": next((n for n in (1, 3, 5, 10, 25, 50) if own < n), None)}
+
 
 @router.get("/wheel/config")
 async def get_wheel_config(user_id: int | str = Query(...)):

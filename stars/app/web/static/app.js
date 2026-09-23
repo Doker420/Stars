@@ -1,5 +1,5 @@
 // ==============================================================
-// StarVault - Production Web & Telegram Mini App Engine v2.5.0
+// StarVault - Production Web & Telegram Mini App Engine v3.0.0
 // ==============================================================
 
 let currentUserId = null;
@@ -447,6 +447,7 @@ function switchTab(tabName) {
         loadTasksList();
     } else if (tabName === 'wheel') {
         drawWheel(currentWheelRotation);
+        loadGameHub();
     }
 }
 
@@ -816,6 +817,84 @@ function showWinModal(reward) {
             { text: '🎁 Забрать в профиль', class: 'btn-modal-green', onClick: () => { loadUserProfile(); return true; } }
         ]
     });
+}
+
+// ==============================================================
+// GAME HUB: DAILY STREAK, CASES, LEVELS AND REFERRAL LEADERBOARD
+// ==============================================================
+async function loadGameHub() {
+    const uid = currentUserId || currentTelegramId;
+    if (!uid) return;
+    try {
+        const [profileRes, casesRes] = await Promise.all([
+            fetch(`/api/game/profile?user_id=${uid}`, {cache: 'no-store'}),
+            fetch(`/api/cases?user_id=${uid}`, {cache: 'no-store'})
+        ]);
+        if (!profileRes.ok || !casesRes.ok) throw new Error('game API unavailable');
+        const profile = await profileRes.json();
+        const casesData = await casesRes.json();
+        document.getElementById('gameLevelName').textContent = profile.vip ? `💎 ${profile.level.name}` : profile.level.name;
+        document.getElementById('gameXpLabel').textContent = `${profile.level.xp} XP`;
+        document.getElementById('gameStreakLabel').textContent = `🔥 ${profile.streak}`;
+        document.getElementById('gameKeysLabel').textContent = `🗝 ${profile.case_keys}`;
+        document.getElementById('gameXpProgress').style.width = `${profile.level.progress}%`;
+        document.getElementById('caseBalanceLabel').textContent = `🗝 ${profile.case_keys}`;
+        const daily = document.getElementById('dailyClaimBtn');
+        daily.disabled = !profile.daily_available;
+        daily.textContent = profile.daily_available ? '🎁 ЗАБРАТЬ ЕЖЕДНЕВНУЮ НАГРАДУ' : '✅ НАГРАДА СЕГОДНЯ ПОЛУЧЕНА';
+        renderCases(casesData.cases || []);
+    } catch (e) {
+        console.error('Game hub:', e);
+        const grid = document.getElementById('casesGrid');
+        if (grid) grid.innerHTML = '<div class="case-loading">Не удалось загрузить сундуки</div>';
+    }
+}
+
+function renderCases(cases) {
+    const grid = document.getElementById('casesGrid');
+    if (!grid) return;
+    grid.innerHTML = cases.map(c => `
+        <div class="case-card">
+            <div class="case-icon">${c.icon}</div><div class="case-title">${c.title}</div>
+            <div class="case-payments">
+                <button class="case-open-btn" onclick="openCase('${c.id}','key')">🗝 ${c.prices.key}</button>
+                <button class="case-open-btn" onclick="openCase('${c.id}','stars')">⭐ ${c.prices.stars}</button>
+                <button class="case-open-btn" onclick="openCase('${c.id}','rub')">₽ ${c.prices.rub}</button>
+            </div>
+        </div>`).join('');
+}
+
+async function claimDailyReward() {
+    const uid = currentUserId || currentTelegramId;
+    try {
+        const res = await fetch('/api/daily/claim', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:uid})});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        tgHaptic('success'); showToast(data.message); await loadGameHub(); await loadUserProfile();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function openCase(caseId, paymentMethod) {
+    const uid = currentUserId || currentTelegramId;
+    try {
+        const res = await fetch(`/api/cases/${caseId}/open`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({user_id:uid, payment_method:paymentMethod})});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Не удалось открыть сундук');
+        tgHaptic('success');
+        showModal({icon:'🎉', title:'Сундук открыт!', subtitle:data.message, buttons:[{text:'Забрать приз',class:'btn-modal-green',onClick:()=>true}]});
+        await loadGameHub(); await loadUserProfile();
+    } catch (e) { tgHaptic('error'); showToast(e.message, 'error'); }
+}
+
+async function showReferralLeaderboard() {
+    const uid = currentUserId || currentTelegramId;
+    try {
+        const res = await fetch(`/api/referrals/leaderboard?user_id=${uid}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Ошибка');
+        const rows = data.leaders.map((u,i)=>`<div class="referral-step-row"><div class="step-badge-num">${i+1}</div><div class="step-text-main">@${u.username}</div><b>${u.referrals} 👥</b></div>`).join('');
+        showModal({icon:'🏆',title:'Рейтинг рефералов',subtitle:`У вас ${data.my_referrals} приглашённых${data.next_goal ? `. Следующая цель: ${data.next_goal}` : ''}`,html:rows,buttons:[{text:'Пригласить друга',class:'btn-modal-primary',onClick:()=>{handleShareRefLink();return true;}}]});
+    } catch(e) { showToast(e.message,'error'); }
 }
 
 // ==============================================================

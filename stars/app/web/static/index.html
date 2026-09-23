@@ -163,8 +163,16 @@
           <span style="color: var(--accent-gold); font-size: 12px;" id="wheelSpinsAvailableLabel">Спинов: 1</span>
         </div>
         <div class="section-desc-text">
-          Вращайте колесо и выигрывайте Звёзды, рубли на баланс и промокоды!
+          Вращайте колесо, открывайте сундуки и повышайте уровень!
         </div>
+
+        <div class="game-profile-strip">
+          <div><b id="gameLevelName">Новичок</b><small id="gameXpLabel">0 XP</small></div>
+          <div><b id="gameStreakLabel">🔥 0</b><small>серия дней</small></div>
+          <div><b id="gameKeysLabel">🗝 0</b><small>ключи</small></div>
+        </div>
+        <div class="game-xp-track"><div id="gameXpProgress" class="game-xp-fill"></div></div>
+        <button class="pill-action-btn btn-green-gradient" id="dailyClaimBtn" onclick="claimDailyReward()">🎁 ЗАБРАТЬ ЕЖЕДНЕВНУЮ НАГРАДУ</button>
 
         <!-- Animated Wheel Canvas -->
         <div class="wheel-outer-wrapper">
@@ -181,8 +189,12 @@
         </button>
 
         <div style="font-size: 11px; color: var(--text-dark-muted); margin-top: 6px;">
-          Бесплатный спин начисляется каждый день. Дополнительные спины даются за выполнение заданий!
+          Бесплатный спин начисляется за ежедневный вход. На 7-й день вы получите ещё и ключ!
         </div>
+
+        <div class="section-title-tracked game-section-gap"><span>🧰 СУНДУКИ</span><span id="caseBalanceLabel">🗝 0</span></div>
+        <div class="cases-grid" id="casesGrid"><div class="case-loading">Загружаем сундуки…</div></div>
+        <button class="pill-action-btn btn-dark-glass" onclick="showReferralLeaderboard()">🏆 РЕЙТИНГ РЕФЕРАЛОВ</button>
       </div>
     </section>
 
@@ -403,6 +415,6 @@
 
   </div>
 
-  <script src="/static/app.js?v=2.6.0"></script>
+  <script src="/static/app.js?v=3.0.0"></script>
 </body>
 </html>

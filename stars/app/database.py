@@ -55,6 +55,19 @@ async def init_db():
             await db.execute("ALTER TABLE users ADD COLUMN avatar_url TEXT")
         except Exception:
             pass
+        # Gamification profile. Migrations are intentionally additive so existing
+        # production databases keep all balances and orders.
+        for migration in (
+            "ALTER TABLE users ADD COLUMN case_keys INTEGER DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN xp INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN login_streak INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN last_daily_claim TEXT",
+            "ALTER TABLE users ADD COLUMN vip_until TEXT",
+        ):
+            try:
+                await db.execute(migration)
+            except Exception:
+                pass
         
         # 2. Orders table
         await db.execute("""
@@ -156,7 +169,33 @@ async def init_db():
         )
         """)
         
-        # 8. Settings table
+        # 8. Case openings and product analytics
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS case_openings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            case_id TEXT NOT NULL,
+            payment_method TEXT NOT NULL,
+            reward_type TEXT NOT NULL,
+            reward_value REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS analytics_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            event_name TEXT NOT NULL,
+            metadata TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_events_name_created ON analytics_events(event_name, created_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_case_openings_user_created ON case_openings(user_id, created_at)")
+
+        # 9. Settings table
         await db.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
