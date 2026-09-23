@@ -197,6 +197,12 @@ def promo_task_card(campaign: Campaign) -> InlineKeyboardMarkup:
         CampaignKind.CHANNEL.value: "📢 Открыть канал",
         CampaignKind.BOT.value: "🤖 Запустить бота",
         CampaignKind.POST.value: "📝 Открыть пост",
+        CampaignKind.REACTION.value: "👍 Поставить реакцию",
+        CampaignKind.POLL.value: "📊 Проголосовать",
+        CampaignKind.COMMENT.value: "💬 Оставить комментарий",
+        CampaignKind.STORY.value: "👁 Посмотреть Story",
+        CampaignKind.PREMIUM_REACTION.value: "💎 Premium-реакция",
+        CampaignKind.CHANNEL_BOOST.value: "🚀 Бустить канал",
     }.get(campaign.kind, "🔗 Перейти")
     return markup(
         [url_button(label, campaign.url)],
@@ -230,6 +236,14 @@ def promote_kinds() -> InlineKeyboardMarkup:
     ]
     rows.append([button("Отмена", "menu:promote")])
     return markup(*rows)
+
+
+def promote_audience() -> InlineKeyboardMarkup:
+    return markup(
+        [button("👥 Все пользователи", "pr:audience:all")],
+        [button("💎 Только Telegram Premium (+25%)", "pr:audience:premium")],
+        [button("Отмена", "menu:promote")],
+    )
 
 
 def promote_confirm() -> InlineKeyboardMarkup:

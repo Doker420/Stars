@@ -60,7 +60,14 @@ RUNTIME_OVERRIDABLE: dict[str, type] = {
     "campaign_reward_channel": int,
     "campaign_reward_bot": int,
     "campaign_reward_post": int,
+    "campaign_reward_reaction": int,
+    "campaign_reward_poll": int,
+    "campaign_reward_comment": int,
+    "campaign_reward_story": int,
+    "campaign_reward_premium_reaction": int,
+    "campaign_reward_channel_boost": int,
     "campaign_reward_custom": int,
+    "campaign_premium_markup_percent": int,
     "campaign_xtr_per_reward": int,
     "campaign_service_fee_percent": int,
     "campaign_max_active_per_user": int,
@@ -125,7 +132,14 @@ RUNTIME_SETTING_LABELS: dict[str, str] = {
     "campaign_reward_channel": "Продвижение: награда за подписку, ⭐",
     "campaign_reward_bot": "Продвижение: награда за запуск бота, ⭐",
     "campaign_reward_post": "Продвижение: награда за просмотр поста, ⭐",
+    "campaign_reward_reaction": "Продвижение: награда за реакцию, ⭐",
+    "campaign_reward_poll": "Продвижение: награда за опрос, ⭐",
+    "campaign_reward_comment": "Продвижение: награда за комментарий, ⭐",
+    "campaign_reward_story": "Продвижение: награда за Story, ⭐",
+    "campaign_reward_premium_reaction": "Продвижение: Premium-реакция, ⭐",
+    "campaign_reward_channel_boost": "Продвижение: буст канала, ⭐",
     "campaign_reward_custom": "Продвижение: награда за своё задание, ⭐",
+    "campaign_premium_markup_percent": "Продвижение: наценка Premium-аудитории, %",
     "campaign_xtr_per_reward": "Продвижение: XTR за 1 ⭐ награды",
     "campaign_service_fee_percent": "Продвижение: комиссия сервиса, %",
     "campaign_max_active_per_user": "Продвижение: активных кампаний на юзера",
@@ -267,7 +281,14 @@ class Settings(BaseSettings):
     campaign_reward_channel: int = 2
     campaign_reward_bot: int = 3
     campaign_reward_post: int = 1
+    campaign_reward_reaction: int = 2
+    campaign_reward_poll: int = 3
+    campaign_reward_comment: int = 4
+    campaign_reward_story: int = 2
+    campaign_reward_premium_reaction: int = 5
+    campaign_reward_channel_boost: int = 15
     campaign_reward_custom: int = 2
+    campaign_premium_markup_percent: int = 25
     # Price: target_count × reward × XTR-per-star × (100 + fee) / 100
     campaign_xtr_per_reward: int = 1
     campaign_service_fee_percent: int = 20
@@ -319,7 +340,14 @@ class Settings(BaseSettings):
         "campaign_reward_channel",
         "campaign_reward_bot",
         "campaign_reward_post",
+        "campaign_reward_reaction",
+        "campaign_reward_poll",
+        "campaign_reward_comment",
+        "campaign_reward_story",
+        "campaign_reward_premium_reaction",
+        "campaign_reward_channel_boost",
         "campaign_reward_custom",
+        "campaign_premium_markup_percent",
         "campaign_xtr_per_reward",
         "campaign_service_fee_percent",
         "campaign_max_active_per_user",
@@ -404,16 +432,24 @@ class Settings(BaseSettings):
             "channel": self.campaign_reward_channel,
             "bot": self.campaign_reward_bot,
             "post": self.campaign_reward_post,
+            "reaction": self.campaign_reward_reaction,
+            "poll": self.campaign_reward_poll,
+            "comment": self.campaign_reward_comment,
+            "story": self.campaign_reward_story,
+            "premium_reaction": self.campaign_reward_premium_reaction,
+            "channel_boost": self.campaign_reward_channel_boost,
             "custom": self.campaign_reward_custom,
         }
         return max(mapping.get(kind, self.campaign_reward_custom), 0)
 
-    def campaign_price(self, kind: str, target_count: int) -> int:
-        """Total XTR the advertiser pays for ``target_count`` completions."""
+    def campaign_price(self, kind: str, target_count: int, *, premium_only: bool = False) -> int:
+        """Total XTR for completions, including service and Premium targeting markup."""
         reward = self.campaign_reward(kind)
         base = reward * max(target_count, 0) * max(self.campaign_xtr_per_reward, 1)
-        with_fee = base * (100 + max(self.campaign_service_fee_percent, 0))
-        return max((with_fee + 99) // 100, 1)
+        percent = 100 + max(self.campaign_service_fee_percent, 0)
+        if premium_only:
+            percent = percent * (100 + max(self.campaign_premium_markup_percent, 0)) // 100
+        return max((base * percent + 99) // 100, 1)
 
     def referral_percent(self, level: int) -> int:
         mapping = {1: self.referral_l1_percent, 2: self.referral_l2_percent}

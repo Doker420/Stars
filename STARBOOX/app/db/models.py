@@ -492,6 +492,12 @@ class CampaignKind(StrEnum):
     CHANNEL = "channel"
     BOT = "bot"
     POST = "post"
+    REACTION = "reaction"
+    POLL = "poll"
+    COMMENT = "comment"
+    STORY = "story"
+    PREMIUM_REACTION = "premium_reaction"
+    CHANNEL_BOOST = "channel_boost"
     CUSTOM = "custom"
 
 
@@ -499,6 +505,12 @@ CAMPAIGN_KIND_LABELS: dict[str, str] = {
     CampaignKind.CHANNEL.value: "Канал (подписка)",
     CampaignKind.BOT.value: "Бот (запуск)",
     CampaignKind.POST.value: "Пост (просмотр)",
+    CampaignKind.REACTION.value: "Реакция на пост",
+    CampaignKind.POLL.value: "Голосование в опросе",
+    CampaignKind.COMMENT.value: "Комментарий к посту",
+    CampaignKind.STORY.value: "Просмотр Story",
+    CampaignKind.PREMIUM_REACTION.value: "Premium-реакция",
+    CampaignKind.CHANNEL_BOOST.value: "Буст канала",
     CampaignKind.CUSTOM.value: "Своё задание",
 }
 
@@ -506,8 +518,18 @@ CAMPAIGN_KIND_EMOJI: dict[str, str] = {
     CampaignKind.CHANNEL.value: "📢",
     CampaignKind.BOT.value: "🤖",
     CampaignKind.POST.value: "📝",
+    CampaignKind.REACTION.value: "👍",
+    CampaignKind.POLL.value: "📊",
+    CampaignKind.COMMENT.value: "💬",
+    CampaignKind.STORY.value: "👁",
+    CampaignKind.PREMIUM_REACTION.value: "💎",
+    CampaignKind.CHANNEL_BOOST.value: "🚀",
     CampaignKind.CUSTOM.value: "🔗",
 }
+
+PREMIUM_CAMPAIGN_KINDS: frozenset[str] = frozenset(
+    {CampaignKind.PREMIUM_REACTION.value, CampaignKind.CHANNEL_BOOST.value}
+)
 
 
 class CampaignStatus(StrEnum):
@@ -541,7 +563,10 @@ class Campaign(Base):
     """A promotion bought by a user with Telegram Stars (CPA: pay per completion)."""
 
     __tablename__ = "campaigns"
-    __table_args__ = (Index("ix_campaigns_status_created", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_campaigns_status_created", "status", "created_at"),
+        Index("ix_campaigns_premium_status", "premium_only", "status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     owner_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
@@ -555,6 +580,11 @@ class Campaign(Base):
     target_count: Mapped[int] = mapped_column(Integer)
     done_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     xtr_price: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Any format can target Telegram Premium; inherently Premium formats always
+    # set this flag. Verification records whether Telegram can confirm the action
+    # or a moderator must review it.
+    premium_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    verification_mode: Mapped[str] = mapped_column(String(24), default="manual", server_default="manual")
     status: Mapped[str] = mapped_column(String(16), default=CampaignStatus.DRAFT.value)
     telegram_charge_id: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
     moderation_note: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db.models import (
     OPEN_CAMPAIGN_STATUSES,
+    PREMIUM_CAMPAIGN_KINDS,
     Campaign,
     CampaignClaim,
     CampaignKind,
@@ -66,20 +67,25 @@ class CampaignQuote:
     target_count: int
     reward: int
     price_xtr: int
+    premium_only: bool = False
 
     @property
     def payout(self) -> int:
         return self.reward * self.target_count
 
 
-def quote(settings: Settings, *, kind: str, target_count: int) -> CampaignQuote:
+def quote(
+    settings: Settings, *, kind: str, target_count: int, premium_only: bool = False
+) -> CampaignQuote:
     validate_kind(kind)
     validate_target(settings, target_count)
+    premium_only = premium_only or kind in PREMIUM_CAMPAIGN_KINDS
     return CampaignQuote(
         kind=kind,
         target_count=target_count,
         reward=settings.campaign_reward(kind),
-        price_xtr=settings.campaign_price(kind, target_count),
+        price_xtr=settings.campaign_price(kind, target_count, premium_only=premium_only),
+        premium_only=premium_only,
     )
 
 
@@ -115,7 +121,7 @@ def parse_target(kind: str, raw: str) -> tuple[str, str | None]:
     if not value:
         raise ValidationError("Укажите ссылку")
 
-    if kind == CampaignKind.CHANNEL.value:
+    if kind in {CampaignKind.CHANNEL.value, CampaignKind.CHANNEL_BOOST.value}:
         # Same notation as the OP channel list: @name or -100…|https://t.me/+invite
         problem = validate_channel_entry(value)
         if problem:
@@ -154,6 +160,7 @@ async def create_draft(
     target_raw: str,
     target_count: int,
     settings: Settings,
+    premium_only: bool = False,
 ) -> Campaign:
     if not settings.promo_campaigns_enabled:
         raise EconomyError("Продвижение временно отключено")
@@ -166,7 +173,16 @@ async def create_draft(
         raise ValidationError(f"У вас уже {limit} активных кампаний. Дождитесь их завершения.")
 
     url, check_chat = parse_target(kind, target_raw)
-    price = settings.campaign_price(kind, target_count)
+    premium_only = premium_only or kind in PREMIUM_CAMPAIGN_KINDS
+    price = settings.campaign_price(kind, target_count, premium_only=premium_only)
+    verification_mode = {
+        CampaignKind.CHANNEL.value: "telegram",
+        CampaignKind.BOT.value: "telegram",
+        CampaignKind.POLL.value: "poll_or_moderation",
+        CampaignKind.REACTION.value: "moderation",
+        CampaignKind.PREMIUM_REACTION.value: "moderation",
+        CampaignKind.CHANNEL_BOOST.value: "telegram",
+    }.get(kind, "manual")
     campaign = Campaign(
         owner_id=owner.id,
         kind=kind,
@@ -177,6 +193,8 @@ async def create_draft(
         reward=settings.campaign_reward(kind),
         target_count=target_count,
         xtr_price=price,
+        premium_only=premium_only,
+        verification_mode=verification_mode,
         status=CampaignStatus.AWAITING_PAYMENT.value,
     )
     session.add(campaign)
@@ -256,6 +274,8 @@ async def list_available(
             Campaign.owner_id != user.id,
             Campaign.done_count < Campaign.target_count,
             Campaign.id.not_in(done),
+            # Telegram Premium campaigns must never leak into the regular feed.
+            (Campaign.premium_only.is_(False) | (Campaign.premium_only.is_(True) & (user.is_premium is True))),
         )
         .order_by(Campaign.reward.desc(), Campaign.id)
         .limit(limit)
@@ -304,6 +324,8 @@ async def complete(
         raise EconomyError("Нельзя выполнять собственное задание")
     if campaign.status != CampaignStatus.ACTIVE.value:
         raise EconomyError("Задание больше недоступно")
+    if campaign.premium_only and not user.is_premium:
+        raise EconomyError("Это задание доступно только пользователям Telegram Premium")
     if campaign.budget_left <= 0:
         raise EconomyError("Лимит выполнений по заданию исчерпан")
     ensure_action_cooldown(user, settings)

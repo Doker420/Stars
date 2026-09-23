@@ -10,7 +10,7 @@ from app.bot import keyboards, texts
 from app.bot.handlers.states import UserFSM
 from app.bot.utils import parse_id, safe_answer, safe_edit
 from app.config import Settings
-from app.db.models import Campaign, CampaignKind, CampaignStatus, User
+from app.db.models import PREMIUM_CAMPAIGN_KINDS, Campaign, CampaignKind, CampaignStatus, User
 from app.services import campaigns as campaign_service
 from app.services.errors import EconomyError
 
@@ -110,11 +110,34 @@ async def promote_kind(call: CallbackQuery, state: FSMContext) -> None:
     if kind not in {item.value for item in CampaignKind}:
         await safe_answer(call, "Неизвестный формат", alert=True)
         return
-    await state.set_state(UserFSM.campaign_title)
     await state.update_data(kind=kind)
     await safe_answer(call)
+    if kind in PREMIUM_CAMPAIGN_KINDS:
+        await state.update_data(premium_only=True)
+        await state.set_state(UserFSM.campaign_title)
+        await safe_edit(
+            call.message, texts.promote_title_prompt(kind), keyboards.cancel_only("menu:promote")
+        )
+        return
+    await state.set_state(UserFSM.campaign_audience)
     await safe_edit(
-        call.message, texts.promote_title_prompt(kind), keyboards.cancel_only("menu:promote")
+        call.message,
+        "🎯 <b>Кому показывать задание?</b>\n\nPremium-таргетинг повышает цену кампании на 25%.",
+        keyboards.promote_audience(),
+    )
+
+
+@router.callback_query(StateFilter(UserFSM.campaign_audience), F.data.startswith("pr:audience:"))
+async def promote_audience(call: CallbackQuery, state: FSMContext) -> None:
+    premium_only = (call.data or "").endswith(":premium")
+    data = await state.get_data()
+    await state.update_data(premium_only=premium_only)
+    await state.set_state(UserFSM.campaign_title)
+    await safe_answer(call)
+    await safe_edit(
+        call.message,
+        texts.promote_title_prompt(data["kind"]),
+        keyboards.cancel_only("menu:promote"),
     )
 
 
@@ -154,7 +177,9 @@ async def promote_description(message: Message, state: FSMContext, settings: Set
     await state.update_data(description=campaign_service.normalize_description(message.text or ""))
     await state.set_state(UserFSM.campaign_count)
     await message.answer(
-        texts.promote_count_prompt(data["kind"], settings),
+        texts.promote_count_prompt(
+            data["kind"], settings, premium_only=bool(data.get("premium_only"))
+        ),
         reply_markup=keyboards.cancel_only("menu:promote"),
     )
 
@@ -167,7 +192,12 @@ async def promote_count(message: Message, state: FSMContext, settings: Settings)
         return
     data = await state.get_data()
     try:
-        quote = campaign_service.quote(settings, kind=data["kind"], target_count=int(raw))
+        quote = campaign_service.quote(
+            settings,
+            kind=data["kind"],
+            target_count=int(raw),
+            premium_only=bool(data.get("premium_only")),
+        )
     except EconomyError as exc:
         await message.answer(f"⚠️ {exc.message}")
         return
@@ -201,6 +231,7 @@ async def promote_pay(
             target_raw=data.get("target_raw") or data["url"],
             target_count=int(data["target_count"]),
             settings=settings,
+            premium_only=bool(data.get("premium_only")),
         )
     except EconomyError as exc:
         await safe_answer(call, exc.message, alert=True)

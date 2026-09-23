@@ -367,7 +367,14 @@ def promote_home(active: int, limit: int, enabled: bool) -> str:
         "📢 Канал — подписка (проверяем через Telegram)\n"
         "🤖 Бот — запуск по твоей ссылке\n"
         "📝 Пост — просмотр публикации\n"
+        "👍 Реакция — обычная реакция на пост\n"
+        "📊 Опрос — голосование с авто- или ручной проверкой\n"
+        "💬 Комментарий — действие с модерацией\n"
+        "👁 Story — просмотр истории\n"
+        "💎 Premium-реакция — только Telegram Premium\n"
+        "🚀 Буст канала — только Telegram Premium\n"
         "🔗 Своё задание — любое действие по ссылке\n\n"
+        "Для любого формата доступен Premium-таргетинг (+25% к цене).\n"
         "Платишь только за выполнения: цена = количество × ставка.\n\n"
         f"Твои активные кампании: <b>{active}</b> из {limit}."
     )
@@ -414,11 +421,11 @@ def promote_description_prompt() -> str:
     )
 
 
-def promote_count_prompt(kind: str, settings: Settings) -> str:
+def promote_count_prompt(kind: str, settings: Settings, *, premium_only: bool = False) -> str:
     reward = settings.campaign_reward(kind)
     low = max(settings.campaign_min_target, 1)
     example = max(low, 100)
-    price = settings.campaign_price(kind, example)
+    price = settings.campaign_price(kind, example, premium_only=premium_only)
     return (
         "📣 <b>Шаг 5 из 5</b>\n\n"
         f"Сколько выполнений нужно? От {low} до {settings.campaign_max_target}.\n\n"
@@ -449,6 +456,7 @@ def promote_confirm(
         f"Выполнений: <b>{quote.target_count}</b>",
         f"Награда исполнителю: <b>{quote.reward} {STAR}</b> за штуку",
         f"К оплате: <b>{quote.price_xtr} XTR</b>",
+        f"Аудитория: <b>{'только Telegram Premium' if quote.premium_only else 'все пользователи'}</b>",
     ]
     if moderation:
         lines += ["", "После оплаты кампания уйдёт на модерацию (обычно до нескольких часов). "
