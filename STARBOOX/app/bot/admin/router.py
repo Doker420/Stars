@@ -1,0 +1,37 @@
+from aiogram import Router
+
+from app.bot.admin import (
+    admins,
+    broadcast,
+    campaigns,
+    catalog,
+    data,
+    home,
+    payments,
+    promo,
+    settings,
+    users,
+    withdrawals,
+)
+from app.bot.filters import IsAdmin
+
+
+def build_admin_router() -> Router:
+    router = Router(name="admin")
+    router.message.filter(IsAdmin())
+    router.callback_query.filter(IsAdmin())
+    for module in (
+        home,
+        users,
+        withdrawals,
+        broadcast,
+        campaigns,
+        catalog,
+        promo,
+        payments,
+        settings,
+        admins,
+        data,
+    ):
+        router.include_router(module.router)
+    return router
