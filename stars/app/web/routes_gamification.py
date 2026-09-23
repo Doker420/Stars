@@ -58,6 +58,10 @@ class OpenCaseRequest(BaseModel):
     user_id: int | str
     payment_method: str = "key"
 
+class BuyVipRequest(BaseModel):
+    user_id: int | str
+    payment_method: str = "stars"
+
 CASES = {
     "starter": {
         "id": "starter", "title": "Стартовый сундук", "icon": "🎁",
@@ -120,7 +124,39 @@ async def game_profile(user_id: int | str = Query(...)):
             "next_daily_at": next_claim.isoformat(),
             "level": level_info(int(user.get("xp", 0))),
             "vip": bool(user.get("vip_until") and user["vip_until"] >= today.isoformat()),
+            "vip_until": user.get("vip_until"),
+            "vip_prices": {"stars": 150, "rub": 199},
+            "risk_score": int(user.get("risk_score", 0)),
         }
+
+
+@router.post("/vip/buy")
+async def buy_vip(req: BuyVipRequest):
+    prices = {"stars": ("stars_balance", 150), "rub": ("balance", 199)}
+    if req.payment_method not in prices:
+        raise HTTPException(status_code=400, detail="VIP можно оплатить Stars или рублёвым балансом")
+    field, price = prices[req.payment_method]
+    async with get_db() as db:
+        user = await get_user_by_id_or_tg(db, req.user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute("SELECT * FROM users WHERE id=?", (user["id"],)) as cur:
+            fresh = dict(await cur.fetchone())
+        if fresh.get("is_banned") or int(fresh.get("risk_score", 0)) >= 100:
+            raise HTTPException(status_code=403, detail="Покупка временно недоступна, обратитесь в поддержку")
+        if float(fresh.get(field, 0)) < price:
+            raise HTTPException(status_code=400, detail="Недостаточно средств")
+        today = date.today()
+        current_until = date.fromisoformat(fresh["vip_until"]) if fresh.get("vip_until") else today
+        starts = max(today, current_until)
+        vip_until = starts + timedelta(days=30)
+        season = today.strftime("%Y-%m")
+        season_points = int(fresh.get("season_points", 0)) if fresh.get("season_id") == season else 0
+        await db.execute(f"UPDATE users SET {field}={field}-?, vip_until=?, xp=xp+50, season_id=?, season_points=? WHERE id=?", (price, vip_until.isoformat(), season, season_points + 50, fresh["id"]))
+        await log_event(db, fresh["id"], "vip_purchase", {"payment": req.payment_method, "price": price, "until": vip_until.isoformat()})
+        await db.commit()
+    return {"success": True, "vip_until": vip_until.isoformat(), "message": f"VIP активирован до {vip_until.strftime('%d.%m.%Y')}"}
 
 
 @router.post("/daily/claim")
@@ -137,13 +173,18 @@ async def claim_daily(req: ClaimTaskRequest):
         if last == today:
             raise HTTPException(status_code=409, detail="Ежедневная награда уже получена")
         streak = int(fresh.get("login_streak", 0)) + 1 if last == today - timedelta(days=1) else 1
-        # Every seventh consecutive day also grants a case key.
-        keys = 1 if streak % 7 == 0 else 0
+        is_vip = bool(fresh.get("vip_until") and fresh["vip_until"] >= today.isoformat())
+        # Every seventh consecutive day grants a key; VIP members receive one
+        # extra key every day and double progression XP.
+        keys = (1 if streak % 7 == 0 else 0) + (1 if is_vip else 0)
+        xp_reward = 20 if is_vip else 10
+        season = today.strftime("%Y-%m")
+        season_points = int(fresh.get("season_points", 0)) if fresh.get("season_id") == season else 0
         await db.execute(
-            "UPDATE users SET login_streak=?, last_daily_claim=?, spins_count=spins_count+1, case_keys=case_keys+?, xp=xp+10 WHERE id=?",
-            (streak, today.isoformat(), keys, fresh["id"]),
+            "UPDATE users SET login_streak=?, last_daily_claim=?, spins_count=spins_count+1, case_keys=case_keys+?, xp=xp+?, season_id=?, season_points=? WHERE id=?",
+            (streak, today.isoformat(), keys, xp_reward, season, season_points + xp_reward, fresh["id"]),
         )
-        await log_event(db, fresh["id"], "daily_claim", {"streak": streak, "keys": keys})
+        await log_event(db, fresh["id"], "daily_claim", {"streak": streak, "keys": keys, "vip": is_vip})
         await db.commit()
     return {"success": True, "streak": streak, "spins": 1, "keys": keys, "message": f"День {streak}: +1 спин" + (" и +1 ключ" if keys else "")}
 
@@ -170,19 +211,44 @@ async def open_case(case_id: str, req: OpenCaseRequest):
         await db.execute("BEGIN IMMEDIATE")
         async with db.execute("SELECT * FROM users WHERE id=?", (user["id"],)) as cur:
             fresh = dict(await cur.fetchone())
+        async with db.execute("SELECT COUNT(*) count FROM case_openings WHERE user_id=? AND created_at >= datetime('now','-1 minute')", (fresh["id"],)) as cur:
+            recent_opens = (await cur.fetchone())["count"]
+        if recent_opens >= 20:
+            await db.execute("UPDATE users SET risk_score=risk_score+10 WHERE id=?", (fresh["id"],))
+            await db.commit()
+            raise HTTPException(status_code=429, detail="Слишком много открытий. Подождите одну минуту.")
+        if fresh.get("is_banned") or int(fresh.get("risk_score", 0)) >= 100:
+            raise HTTPException(status_code=403, detail="Игровые операции временно ограничены")
         price = case["prices"][req.payment_method]
         field = {"key": "case_keys", "stars": "stars_balance", "rub": "balance"}[req.payment_method]
         if float(fresh.get(field, 0)) < price:
             raise HTTPException(status_code=400, detail="Недостаточно средств для открытия сундука")
         reward_type, reward_value, _ = random.choices(case["rewards"], weights=[r[2] for r in case["rewards"]], k=1)[0]
         reward_field = {"stars": "stars_balance", "rub": "balance", "spin": "spins_count", "key": "case_keys"}[reward_type]
+        xp_reward = 30 if fresh.get("vip_until") and fresh["vip_until"] >= date.today().isoformat() else 15
         await db.execute(f"UPDATE users SET {field}={field}-? WHERE id=?", (price, fresh["id"]))
-        await db.execute(f"UPDATE users SET {reward_field}={reward_field}+?, xp=xp+15 WHERE id=?", (reward_value, fresh["id"]))
+        season = date.today().strftime("%Y-%m")
+        season_points = int(fresh.get("season_points", 0)) if fresh.get("season_id") == season else 0
+        await db.execute(f"UPDATE users SET {reward_field}={reward_field}+?, xp=xp+?, season_id=?, season_points=? WHERE id=?", (reward_value, xp_reward, season, season_points + xp_reward, fresh["id"]))
         await db.execute("INSERT INTO case_openings (user_id, case_id, payment_method, reward_type, reward_value) VALUES (?, ?, ?, ?, ?)", (fresh["id"], case_id, req.payment_method, reward_type, reward_value))
         await log_event(db, fresh["id"], "case_open", {"case": case_id, "payment": req.payment_method, "reward": reward_type, "value": reward_value})
         await db.commit()
     labels = {"stars": "⭐", "rub": "₽", "spin": "спин", "key": "ключ"}
     return {"success": True, "reward": {"type": reward_type, "value": reward_value, "label": labels[reward_type]}, "message": f"Вы выиграли {reward_value} {labels[reward_type]}!"}
+
+
+@router.get("/game/leaderboard")
+async def game_leaderboard(user_id: int | str = Query(...)):
+    season = date.today().strftime("%Y-%m")
+    async with get_db() as db:
+        user = await get_user_by_id_or_tg(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        async with db.execute("SELECT id, COALESCE(username, 'user') username, season_points points FROM users WHERE season_id=? AND is_banned=0 ORDER BY season_points DESC, id LIMIT 20", (season,)) as cur:
+            leaders = [dict(row) for row in await cur.fetchall()]
+        async with db.execute("SELECT COUNT(*)+1 rank FROM users WHERE season_id=? AND season_points>? AND is_banned=0", (season, user.get("season_points", 0))) as cur:
+            rank = (await cur.fetchone())["rank"]
+    return {"season": season, "leaders": leaders, "my_rank": rank, "my_points": user.get("season_points", 0), "prizes": [{"rank": 1, "keys": 10}, {"rank": 2, "keys": 5}, {"rank": 3, "keys": 3}]}
 
 
 @router.get("/referrals/leaderboard")

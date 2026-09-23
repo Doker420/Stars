@@ -99,6 +99,25 @@ async def get_admin_stats(period: str = Query("all")): # today, week, month, all
         
         return stats
 
+@router.get("/gamification/stats")
+async def gamification_stats(days: int = Query(30, ge=1, le=365)):
+    """Economy, retention and fraud indicators for the admin dashboard."""
+    async with get_db() as db:
+        async with db.execute("SELECT event_name, COUNT(*) count, COUNT(DISTINCT user_id) users FROM analytics_events WHERE created_at >= datetime('now', ?) GROUP BY event_name", (f"-{days} days",)) as cur:
+            events = {row["event_name"]: {"count": row["count"], "users": row["users"]} for row in await cur.fetchall()}
+        async with db.execute("SELECT reward_type, COUNT(*) count, COALESCE(SUM(reward_value),0) value FROM case_openings WHERE created_at >= datetime('now', ?) GROUP BY reward_type", (f"-{days} days",)) as cur:
+            rewards = [dict(row) for row in await cur.fetchall()]
+        async with db.execute("SELECT COUNT(*) count FROM users WHERE vip_until >= date('now')") as cur:
+            active_vip = (await cur.fetchone())["count"]
+        async with db.execute("SELECT COUNT(*) count FROM users WHERE risk_score > 0") as cur:
+            flagged = (await cur.fetchone())["count"]
+        async with db.execute("SELECT COUNT(DISTINCT user_id) count FROM analytics_events WHERE created_at >= datetime('now','-1 day')") as cur:
+            dau = (await cur.fetchone())["count"]
+        async with db.execute("SELECT COUNT(DISTINCT user_id) count FROM analytics_events WHERE created_at >= datetime('now','-7 days')") as cur:
+            wau = (await cur.fetchone())["count"]
+    return {"period_days": days, "events": events, "case_rewards": rewards, "active_vip": active_vip, "flagged_users": flagged, "dau": dau, "wau": wau}
+
+
 @router.get("/orders")
 async def list_orders(search: str = Query(""), status: str = Query("all"), limit: int = 50):
     async with get_db() as db:

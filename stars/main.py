@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="StarVault - Telegram Stars & Premium Store API",
-    version="3.0.0",
+    version="3.1.0",
     lifespan=lifespan
 )
 
@@ -117,7 +117,7 @@ async def root_index():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "app": "StarVault Store", "version": "3.0.0"}
+    return {"status": "ok", "app": "StarVault Store", "version": "3.1.0"}
 
 if __name__ == "__main__":
     uvicorn.run(

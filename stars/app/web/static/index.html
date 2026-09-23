@@ -172,6 +172,10 @@
           <div><b id="gameKeysLabel">🗝 0</b><small>ключи</small></div>
         </div>
         <div class="game-xp-track"><div id="gameXpProgress" class="game-xp-fill"></div></div>
+        <div class="vip-offer" id="vipOfferBox">
+          <div><b>💎 STARVAULT VIP</b><small>2× XP и ежедневный ключ</small></div>
+          <button onclick="showVipPurchase()" id="vipBuyBtn">ПОДКЛЮЧИТЬ</button>
+        </div>
         <button class="pill-action-btn btn-green-gradient" id="dailyClaimBtn" onclick="claimDailyReward()">🎁 ЗАБРАТЬ ЕЖЕДНЕВНУЮ НАГРАДУ</button>
 
         <!-- Animated Wheel Canvas -->
@@ -194,6 +198,7 @@
 
         <div class="section-title-tracked game-section-gap"><span>🧰 СУНДУКИ</span><span id="caseBalanceLabel">🗝 0</span></div>
         <div class="cases-grid" id="casesGrid"><div class="case-loading">Загружаем сундуки…</div></div>
+        <button class="pill-action-btn btn-dark-glass" onclick="showGameLeaderboard()">🏅 СЕЗОННЫЙ РЕЙТИНГ</button>
         <button class="pill-action-btn btn-dark-glass" onclick="showReferralLeaderboard()">🏆 РЕЙТИНГ РЕФЕРАЛОВ</button>
       </div>
     </section>
@@ -415,6 +420,6 @@
 
   </div>
 
-  <script src="/static/app.js?v=3.0.0"></script>
+  <script src="/static/app.js?v=3.1.0"></script>
 </body>
 </html>

@@ -63,6 +63,9 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN login_streak INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN last_daily_claim TEXT",
             "ALTER TABLE users ADD COLUMN vip_until TEXT",
+            "ALTER TABLE users ADD COLUMN risk_score INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN season_points INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN season_id TEXT",
         ):
             try:
                 await db.execute(migration)

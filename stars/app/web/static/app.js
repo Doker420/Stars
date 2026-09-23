@@ -1,5 +1,5 @@
 // ==============================================================
-// StarVault - Production Web & Telegram Mini App Engine v3.0.0
+// StarVault - Production Web & Telegram Mini App Engine v3.1.0
 // ==============================================================
 
 let currentUserId = null;
@@ -839,6 +839,8 @@ async function loadGameHub() {
         document.getElementById('gameKeysLabel').textContent = `🗝 ${profile.case_keys}`;
         document.getElementById('gameXpProgress').style.width = `${profile.level.progress}%`;
         document.getElementById('caseBalanceLabel').textContent = `🗝 ${profile.case_keys}`;
+        const vipButton = document.getElementById('vipBuyBtn');
+        if (vipButton) vipButton.textContent = profile.vip ? `АКТИВЕН ДО ${profile.vip_until}` : 'ПОДКЛЮЧИТЬ';
         const daily = document.getElementById('dailyClaimBtn');
         daily.disabled = !profile.daily_available;
         daily.textContent = profile.daily_available ? '🎁 ЗАБРАТЬ ЕЖЕДНЕВНУЮ НАГРАДУ' : '✅ НАГРАДА СЕГОДНЯ ПОЛУЧЕНА';
@@ -884,6 +886,32 @@ async function openCase(caseId, paymentMethod) {
         showModal({icon:'🎉', title:'Сундук открыт!', subtitle:data.message, buttons:[{text:'Забрать приз',class:'btn-modal-green',onClick:()=>true}]});
         await loadGameHub(); await loadUserProfile();
     } catch (e) { tgHaptic('error'); showToast(e.message, 'error'); }
+}
+
+function showVipPurchase() {
+    showModal({icon:'💎',title:'StarVault VIP',subtitle:'30 дней: двойной XP и один ключ каждый день',html:'<div style="text-align:center;color:var(--text-muted)">Выберите способ оплаты</div>',buttons:[
+        {text:'⭐ 150 внутренних Stars',class:'btn-modal-primary',onClick:()=>{buyVip('stars');return true;}},
+        {text:'₽ 199 с баланса',class:'btn-modal-green',onClick:()=>{buyVip('rub');return true;}}
+    ]});
+}
+
+async function buyVip(paymentMethod) {
+    const uid = currentUserId || currentTelegramId;
+    try {
+        const res = await fetch('/api/vip/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:uid,payment_method:paymentMethod})});
+        const data = await res.json(); if(!res.ok) throw new Error(data.detail || 'Ошибка покупки VIP');
+        showToast(data.message); await loadGameHub(); await loadUserProfile();
+    } catch(e) { showToast(e.message,'error'); }
+}
+
+async function showGameLeaderboard() {
+    const uid = currentUserId || currentTelegramId;
+    try {
+        const res = await fetch(`/api/game/leaderboard?user_id=${uid}`); const data = await res.json();
+        if(!res.ok) throw new Error(data.detail || 'Ошибка');
+        const rows = data.leaders.length ? data.leaders.map((u,i)=>`<div class="referral-step-row"><div class="step-badge-num">${i+1}</div><div class="step-text-main">@${u.username}</div><b>${u.points} XP</b></div>`).join('') : '<div style="text-align:center;color:var(--text-muted)">Сезон только начался — будьте первым!</div>';
+        showModal({icon:'🏅',title:`Сезон ${data.season}`,subtitle:`Ваше место: ${data.my_rank}, очки: ${data.my_points}. Призы: 10/5/3 ключа`,html:rows,buttons:[{text:'Продолжить играть',class:'btn-modal-primary',onClick:()=>true}]});
+    } catch(e) { showToast(e.message,'error'); }
 }
 
 async function showReferralLeaderboard() {

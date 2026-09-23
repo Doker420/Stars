@@ -1020,6 +1020,9 @@ body {
 .game-profile-strip small { display:block; color:var(--text-muted); font-size:9px; margin-top:3px; }
 .game-xp-track { width:100%; height:6px; background:rgba(255,255,255,.08); border-radius:8px; overflow:hidden; margin-bottom:12px; }
 .game-xp-fill { width:0; height:100%; background:linear-gradient(90deg,#8b5cf6,#00df72); transition:width .4s ease; }
+.vip-offer { display:flex; align-items:center; justify-content:space-between; width:100%; box-sizing:border-box; padding:11px 12px; margin:8px 0 10px; border:1px solid rgba(245,166,35,.45); border-radius:14px; background:linear-gradient(110deg,rgba(245,166,35,.14),rgba(139,92,246,.14)); }
+.vip-offer b,.vip-offer small { display:block; } .vip-offer b { color:#ffd166;font-size:12px; } .vip-offer small { color:var(--text-muted);font-size:9px;margin-top:3px; }
+.vip-offer button { border:0;border-radius:9px;padding:8px;background:#ffd166;color:#17120a;font-size:9px;font-weight:900; }
 .game-section-gap { margin-top:24px; width:100%; }
 .cases-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; width:100%; margin:10px 0 14px; }
 .case-card { background:linear-gradient(145deg,rgba(139,92,246,.15),rgba(255,255,255,.03)); border:1px solid rgba(139,92,246,.3); border-radius:18px; padding:14px 9px; text-align:center; }
