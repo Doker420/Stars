@@ -142,11 +142,21 @@ class WebServer:
         return web.json_response({"status": "ok", "version": __version__})
 
     async def verify_page(self, request: web.Request) -> web.Response:
-        return web.Response(text=VERIFY_PAGE, content_type="text/html", charset="utf-8")
+        return web.Response(
+            text=VERIFY_PAGE,
+            content_type="text/html",
+            charset="utf-8",
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
+        )
 
     async def game_page(self, request: web.Request) -> web.Response:
         html = GAME_PAGE.replace("{username}", self._bot_username)
-        return web.Response(text=html, content_type="text/html", charset="utf-8")
+        return web.Response(
+            text=html,
+            content_type="text/html",
+            charset="utf-8",
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
+        )
 
     async def _game_request(self, request: web.Request) -> tuple[dict[str, Any], WebAppInitData] | web.Response:
         ip = client_ip(request)
