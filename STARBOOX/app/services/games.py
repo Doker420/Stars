@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,12 +16,38 @@ from app.services.errors import EconomyError, ValidationError
 _rng = random.SystemRandom()
 
 CASES = {
+    # One free opening per UTC day. 100 ⭐ is deliberately rare (0.1%): EV ≈ 2.1 ⭐.
+    "star_free": {"title": "Звёздный", "icon": "🌟", "free_price": 0,
+                  "rewards": (("stars", 1, 650), ("stars", 2, 230), ("stars", 5, 90), ("stars", 10, 29), ("stars", 100, 1))},
     "starter": {"title": "Стартовый", "icon": "🎁", "key_price": 1, "stars_price": 20,
-                "rewards": (("stars", 5, 40), ("stars", 10, 30), ("stars", 25, 10), ("spin", 1, 12), ("key", 1, 8))},
+                "rewards": (("stars", 5, 4000), ("stars", 10, 3000), ("stars", 25, 1000), ("spin", 1, 1200), ("key", 1, 799), ("gift", 15, 1))},
     "gold": {"title": "Золотой", "icon": "👑", "key_price": 3, "stars_price": 70,
-             "rewards": (("stars", 25, 35), ("stars", 50, 28), ("stars", 100, 7), ("spin", 2, 18), ("key", 2, 12))},
+             "rewards": (("stars", 25, 3500), ("stars", 50, 2800), ("stars", 100, 700), ("spin", 2, 1800), ("key", 2, 1199), ("gift", 50, 1))},
 }
-WHEEL_REWARDS = (("stars", 2, 28), ("stars", 5, 28), ("stars", 10, 18), ("stars", 25, 5), ("key", 1, 8), ("spin", 1, 13))
+# XTR prices intentionally keep the expected payout below revenue. Telegram Stars
+# credited inside the bot are a loyalty balance, not withdrawable Telegram XTR.
+GAME_PRODUCTS = {
+    "keys_5": {"title": "5 ключей", "xtr": 15, "keys": 5},
+    "keys_15": {"title": "15 ключей", "xtr": 39, "keys": 15},
+    "vip_30": {"title": "STARBOOX VIP на 30 дней", "xtr": 99, "vip_days": 30},
+}
+WHEEL_REWARDS = (("stars", 2, 30), ("stars", 5, 30), ("stars", 10, 18), ("stars", 25, 4), ("key", 1, 7), ("spin", 1, 11))
+
+
+def game_product(slug: str) -> dict | None:
+    return GAME_PRODUCTS.get(slug)
+
+
+async def grant_product(user: User, slug: str) -> None:
+    product = game_product(slug)
+    if product is None:
+        raise ValidationError("Товар не найден")
+    user.case_keys += int(product.get("keys", 0))
+    days = int(product.get("vip_days", 0))
+    if days:
+        now = datetime.now(UTC)
+        base = user.vip_until if user.vip_until and user.vip_until > now else now
+        user.vip_until = base + timedelta(days=days)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +70,10 @@ async def _apply_reward(
         user.spins += reward.amount
     elif reward.kind == "key":
         user.case_keys += reward.amount
+    elif reward.kind == "gift":
+        # Telegram gift delivery is processed from the pending opening by an admin.
+        # Never pretend it was delivered before Telegram confirms the transfer.
+        return
     else:
         raise ValidationError("Неизвестная награда")
 
@@ -57,10 +88,16 @@ async def open_case(session: AsyncSession, *, user: User, case_slug: str, paymen
             raise ValidationError("Идентификатор операции уже использован")
         return existing
     case = CASES.get(case_slug)
-    if case is None or payment not in {"key", "stars"}:
+    allowed_payments = {key.removesuffix("_price") for key in case or {} if key.endswith("_price")}
+    if case is None or payment not in allowed_payments:
         raise ValidationError("Кейс или способ оплаты не найден")
     price = int(case[f"{payment}_price"])
-    if payment == "key":
+    if payment == "free":
+        today = datetime.now(UTC).date()
+        if user.last_free_case_on == today:
+            raise EconomyError("Бесплатный Звёздный кейс уже открыт сегодня")
+        user.last_free_case_on = today
+    elif payment == "key":
         if user.case_keys < price:
             raise EconomyError("Недостаточно ключей")
         user.case_keys -= price
@@ -69,8 +106,16 @@ async def open_case(session: AsyncSession, *, user: User, case_slug: str, paymen
             raise EconomyError("Недостаточно Stars на балансе")
         await ledger.debit(session, user_id=user.id, amount=price, kind=LedgerKind.GAME_PURCHASE, reference=f"case:{request_id}")
     reward = _draw(case["rewards"])
-    row = CaseOpening(user_id=user.id, case_slug=case_slug, payment_method=payment, price=price,
-                      reward_kind=reward.kind, reward_amount=reward.amount, request_id=request_id)
+    row = CaseOpening(
+        user_id=user.id,
+        case_slug=case_slug,
+        payment_method=payment,
+        price=price,
+        reward_kind=reward.kind,
+        reward_amount=reward.amount,
+        fulfillment_status="pending" if reward.kind == "gift" else "credited",
+        request_id=request_id,
+    )
     session.add(row)
     await _apply_reward(session, user, reward, f"case_reward:{request_id}", LedgerKind.CASE_REWARD)
     await session.flush()

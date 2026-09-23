@@ -8,12 +8,20 @@ from app.bot.handlers.promote import parse_campaign_payload
 from app.config import Settings
 from app.db.models import Campaign, User
 from app.services import campaigns as campaign_service
+from app.services import games
 from app.services import payments as payment_service
 from app.services.boosts import get_product
 from app.services.economy import fulfill_boost_payment
 
 log = structlog.get_logger("kodostars.payments")
 router = Router(name="payments")
+
+
+def _parse_game_payload(payload: str | None) -> tuple[str, int] | None:
+    parts = (payload or "").split(":")
+    if len(parts) != 3 or parts[0] != "game" or not parts[2].isdigit():
+        return None
+    return parts[1], int(parts[2])
 
 
 def _parse_payload(payload: str | None) -> int | None:
@@ -44,6 +52,19 @@ async def pre_checkout(query: PreCheckoutQuery, session: AsyncSession, db_user: 
         await query.answer(ok=True)
         return
 
+    game_payload = _parse_game_payload(query.invoice_payload)
+    if game_payload is not None:
+        slug, user_id = game_payload
+        product = games.game_product(slug)
+        if user_id != db_user.id or product is None:
+            await query.answer(ok=False, error_message="Товар не найден")
+            return
+        if query.currency != "XTR" or query.total_amount != int(product["xtr"]):
+            await query.answer(ok=False, error_message="Сумма не совпадает")
+            return
+        await query.answer(ok=True)
+        return
+
     product_id = _parse_payload(query.invoice_payload)
     if product_id is None:
         await query.answer(ok=False, error_message="Некорректный платёж")
@@ -69,6 +90,28 @@ async def successful_payment(
     campaign_id = parse_campaign_payload(payment.invoice_payload)
     if campaign_id is not None:
         await _fulfill_campaign(message, session, db_user, settings, payment, campaign_id)
+        return
+
+    game_payload = _parse_game_payload(payment.invoice_payload)
+    if game_payload is not None:
+        slug, user_id = game_payload
+        product_data = games.game_product(slug)
+        if user_id != db_user.id or product_data is None:
+            await message.answer("Оплата получена, но игровой товар не найден. Напишите в /paysupport.")
+            return
+        _, created = await payment_service.record_payment(
+            session,
+            user=db_user,
+            product=None,
+            telegram_charge_id=payment.telegram_payment_charge_id,
+            provider_charge_id=payment.provider_payment_charge_id,
+            invoice_payload=payment.invoice_payload,
+            xtr_amount=payment.total_amount,
+        )
+        if created:
+            await games.grant_product(db_user, slug)
+            await session.flush()
+            await message.answer(f"✅ {product_data['title']} успешно активирован!", reply_markup=keyboards.back_home())
         return
 
     product_id = _parse_payload(payment.invoice_payload)

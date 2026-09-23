@@ -160,6 +160,8 @@ class User(Base):
     streak: Mapped[int] = mapped_column(Integer, default=0)
     case_keys: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     spins: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    vip_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_free_case_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     balance: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     admin_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_daily_on: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -263,6 +265,7 @@ class CaseOpening(Base):
     price: Mapped[int] = mapped_column(Integer)
     reward_kind: Mapped[str] = mapped_column(String(16))
     reward_amount: Mapped[int] = mapped_column(Integer)
+    fulfillment_status: Mapped[str] = mapped_column(String(16), default="credited", server_default="credited")
     request_id: Mapped[str] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -21,6 +21,7 @@ from typing import Any
 
 import structlog
 from aiogram import Bot
+from aiogram.types import LabeledPrice
 from aiogram.utils.web_app import WebAppInitData, safe_parse_webapp_init_data
 from aiohttp import web
 from sqlalchemy import func, select
@@ -116,6 +117,7 @@ class WebServer:
         app.router.add_post("/api/game/profile", self.api_game_profile)
         app.router.add_post("/api/game/case", self.api_open_case)
         app.router.add_post("/api/game/spin", self.api_spin)
+        app.router.add_post("/api/game/invoice", self.api_game_invoice)
         app.router.add_post("/api/device", self.api_device)
         return app
 
@@ -172,7 +174,7 @@ class WebServer:
             refs = int((await session.execute(select(func.count()).select_from(ReferralEdge).where(ReferralEdge.referrer_id == user.id, ReferralEdge.level == 1))).scalar_one())
             await session.commit()
             cases = [{k: v for k, v in item.items() if k != "rewards"} | {"slug": slug} for slug, item in games.CASES.items()]
-            return web.json_response({"user": {"id": user.id, "name": user.display_name, "balance": user.balance, "xp": user.xp, "level": user.level, "streak": user.streak, "keys": user.case_keys, "spins": user.spins, "premium": user.is_premium}, "referrals": refs, "cases": cases})
+            return web.json_response({"user": {"id": user.id, "name": user.display_name, "balance": user.balance, "xp": user.xp, "level": user.level, "streak": user.streak, "keys": user.case_keys, "spins": user.spins, "premium": user.is_premium, "vip_until": user.vip_until.isoformat() if user.vip_until else None, "free_case_available": user.last_free_case_on != datetime.now(UTC).date()}, "referrals": refs, "cases": cases})
 
     async def api_open_case(self, request: web.Request) -> web.Response:
         parsed = await self._game_request(request)
@@ -189,7 +191,7 @@ class WebServer:
             except EconomyError as exc:
                 await session.rollback()
                 return web.json_response({"error": exc.message}, status=400)
-        return web.json_response({"ok": True, "reward": {"kind": row.reward_kind, "amount": row.reward_amount}})
+        return web.json_response({"ok": True, "reward": {"kind": row.reward_kind, "amount": row.reward_amount, "status": row.fulfillment_status}})
 
     async def api_spin(self, request: web.Request) -> web.Response:
         parsed = await self._game_request(request)
@@ -207,6 +209,28 @@ class WebServer:
                 await session.rollback()
                 return web.json_response({"error": exc.message}, status=400)
         return web.json_response({"ok": True, "reward": {"kind": row.reward_kind, "amount": row.reward_amount}})
+
+    async def api_game_invoice(self, request: web.Request) -> web.Response:
+        parsed = await self._game_request(request)
+        if isinstance(parsed, web.Response):
+            return parsed
+        body, init = parsed
+        slug = str(body.get("product") or "")
+        product = games.game_product(slug)
+        if product is None:
+            return web.json_response({"error": "Товар не найден"}, status=404)
+        try:
+            link = await self._bot.create_invoice_link(
+                title=str(product["title"])[:32],
+                description="Покупка для игрового раздела STARBOOX",
+                payload=f"game:{slug}:{init.user.id}",
+                currency="XTR",
+                prices=[LabeledPrice(label=str(product["title"])[:32], amount=int(product["xtr"]))],
+            )
+        except Exception:
+            log.warning("game_invoice_failed", product=slug, user_id=init.user.id, exc_info=True)
+            return web.json_response({"error": "Не удалось создать счёт"}, status=502)
+        return web.json_response({"ok": True, "invoice": link})
 
     async def api_device(self, request: web.Request) -> web.Response:
         ip = client_ip(request)
