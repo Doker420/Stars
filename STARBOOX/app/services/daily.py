@@ -93,6 +93,17 @@ async def claim_daily(
     session.add(claim)
     user.streak = streak
     user.last_daily_on = today
+    # Milestones make the streak visible in the new game hub. They are inventory
+    # rewards, so they cannot be withdrawn or inflate the Stars ledger directly.
+    if streak == 3:
+        user.spins += 1
+    elif streak == 7:
+        user.case_keys += 1
+    elif streak == 14:
+        user.case_keys += 2
+    elif streak == 30:
+        user.case_keys += 5
+        user.spins += 3
     await ledger.credit(
         session,
         user_id=user.id,

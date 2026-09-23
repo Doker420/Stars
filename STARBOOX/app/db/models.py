@@ -39,6 +39,9 @@ class LedgerKind(StrEnum):
     REFUND_REVOKE = "refund_revoke"
     PARTNER_TASK = "partner_task"
     PROMO_TASK = "promo_task"
+    GAME_PURCHASE = "game_purchase"
+    CASE_REWARD = "case_reward"
+    WHEEL_REWARD = "wheel_reward"
 
 
 LEDGER_KIND_LABELS: dict[str, str] = {
@@ -56,6 +59,9 @@ LEDGER_KIND_LABELS: dict[str, str] = {
     LedgerKind.REFUND_REVOKE.value: "Возврат платежа",
     LedgerKind.PARTNER_TASK.value: "Задание партнёра",
     LedgerKind.PROMO_TASK.value: "Задание пользователя",
+    LedgerKind.GAME_PURCHASE.value: "Открытие кейса",
+    LedgerKind.CASE_REWARD.value: "Награда из кейса",
+    LedgerKind.WHEEL_REWARD.value: "Награда рулетки",
 }
 
 
@@ -152,6 +158,8 @@ class User(Base):
     xp: Mapped[int] = mapped_column(Integer, default=0)
     level: Mapped[int] = mapped_column(Integer, default=1)
     streak: Mapped[int] = mapped_column(Integer, default=0)
+    case_keys: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    spins: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     balance: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     admin_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_daily_on: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -241,6 +249,33 @@ class DailyClaim(Base):
     claimed_on: Mapped[date] = mapped_column(Date)
     streak: Mapped[int] = mapped_column(Integer)
     amount: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaseOpening(Base):
+    __tablename__ = "case_openings"
+    __table_args__ = (Index("ix_case_openings_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    case_slug: Mapped[str] = mapped_column(String(32))
+    payment_method: Mapped[str] = mapped_column(String(16))
+    price: Mapped[int] = mapped_column(Integer)
+    reward_kind: Mapped[str] = mapped_column(String(16))
+    reward_amount: Mapped[int] = mapped_column(Integer)
+    request_id: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WheelSpin(Base):
+    __tablename__ = "wheel_spins"
+    __table_args__ = (Index("ix_wheel_spins_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), index=True)
+    reward_kind: Mapped[str] = mapped_column(String(16))
+    reward_amount: Mapped[int] = mapped_column(Integer)
+    request_id: Mapped[str] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

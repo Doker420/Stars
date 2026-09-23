@@ -54,6 +54,10 @@ async def render_home(
         referral_link(bot_username, user.id),
         device_notice=notice,
     )
+    game_url = settings.web_url("app") if settings.web_enabled else None
     return text, keyboards.main_menu(
-        is_admin, device_url=device_url, partner=cached_offer_count(user.id)
+        is_admin,
+        device_url=device_url,
+        game_url=game_url,
+        partner=cached_offer_count(user.id),
     )

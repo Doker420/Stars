@@ -34,11 +34,14 @@ def device_button(url: str) -> InlineKeyboardButton:
 def main_menu(
     is_admin: bool = False,
     device_url: str | None = None,
+    game_url: str | None = None,
     partner: int = 0,
 ) -> InlineKeyboardMarkup:
     rows = []
     if device_url:
         rows.append([device_button(device_url)])
+    if game_url:
+        rows.append([InlineKeyboardButton(text="🎮 Кейсы и рулетка", web_app=WebAppInfo(url=game_url))])
     # Partner offers are the monetized inventory: they sit above everything else
     # on purpose, in a full-width row so the tap target is largest. The count comes
     # from the last real fetch, so the badge costs no extra provider call.

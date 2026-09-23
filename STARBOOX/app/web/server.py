@@ -23,17 +23,18 @@ import structlog
 from aiogram import Bot
 from aiogram.utils.web_app import WebAppInitData, safe_parse_webapp_init_data
 from aiohttp import web
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import __version__
 from app.config import Settings
-from app.db.models import User
-from app.services import devices, events, referrals
+from app.db.models import ReferralEdge, User
+from app.services import devices, events, games, referrals
 from app.services import tasks as task_service
 from app.services.app_settings import RuntimeSettingsStore
 from app.services.errors import EconomyError
 from app.services.events import DomainEvent
-from app.web.page import LANDING_PAGE, VERIFY_PAGE
+from app.web.page import GAME_PAGE, LANDING_PAGE, VERIFY_PAGE
 
 log = structlog.get_logger("kodostars.web")
 
@@ -111,6 +112,10 @@ class WebServer:
         app.router.add_get("/", self.landing)
         app.router.add_get("/health", self.health)
         app.router.add_get("/verify", self.verify_page)
+        app.router.add_get("/app", self.game_page)
+        app.router.add_post("/api/game/profile", self.api_game_profile)
+        app.router.add_post("/api/game/case", self.api_open_case)
+        app.router.add_post("/api/game/spin", self.api_spin)
         app.router.add_post("/api/device", self.api_device)
         return app
 
@@ -136,6 +141,72 @@ class WebServer:
 
     async def verify_page(self, request: web.Request) -> web.Response:
         return web.Response(text=VERIFY_PAGE, content_type="text/html", charset="utf-8")
+
+    async def game_page(self, request: web.Request) -> web.Response:
+        html = GAME_PAGE.replace("{username}", self._bot_username)
+        return web.Response(text=html, content_type="text/html", charset="utf-8")
+
+    async def _game_request(self, request: web.Request) -> tuple[dict[str, Any], WebAppInitData] | web.Response:
+        ip = client_ip(request)
+        if not self._limiter.allow(f"game:{ip or 'unknown'}"):
+            return web.json_response({"error": "Слишком много запросов"}, status=429)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError
+            init = parse_init_data(self._settings.bot_token, str(body.get("initData") or ""))
+        except Exception:
+            return web.json_response({"error": "Подпись Telegram не подтверждена"}, status=401)
+        return body, init
+
+    async def api_game_profile(self, request: web.Request) -> web.Response:
+        parsed = await self._game_request(request)
+        if isinstance(parsed, web.Response):
+            return parsed
+        _, init = parsed
+        async with self._factory() as session:
+            user = await session.get(User, init.user.id)
+            if user is None:
+                return web.json_response({"error": "Сначала запустите бота"}, status=404)
+            user.is_premium = bool(init.user.is_premium)
+            refs = int((await session.execute(select(func.count()).select_from(ReferralEdge).where(ReferralEdge.referrer_id == user.id, ReferralEdge.level == 1))).scalar_one())
+            await session.commit()
+            cases = [{k: v for k, v in item.items() if k != "rewards"} | {"slug": slug} for slug, item in games.CASES.items()]
+            return web.json_response({"user": {"id": user.id, "name": user.display_name, "balance": user.balance, "xp": user.xp, "level": user.level, "streak": user.streak, "keys": user.case_keys, "spins": user.spins, "premium": user.is_premium}, "referrals": refs, "cases": cases})
+
+    async def api_open_case(self, request: web.Request) -> web.Response:
+        parsed = await self._game_request(request)
+        if isinstance(parsed, web.Response):
+            return parsed
+        body, init = parsed
+        async with self._factory() as session:
+            user = await session.get(User, init.user.id)
+            if user is None:
+                return web.json_response({"error": "Сначала запустите бота"}, status=404)
+            try:
+                row = await games.open_case(session, user=user, case_slug=str(body.get("case") or ""), payment=str(body.get("payment") or "key"), request_id=str(body.get("requestId") or ""))
+                await session.commit()
+            except EconomyError as exc:
+                await session.rollback()
+                return web.json_response({"error": exc.message}, status=400)
+        return web.json_response({"ok": True, "reward": {"kind": row.reward_kind, "amount": row.reward_amount}})
+
+    async def api_spin(self, request: web.Request) -> web.Response:
+        parsed = await self._game_request(request)
+        if isinstance(parsed, web.Response):
+            return parsed
+        body, init = parsed
+        async with self._factory() as session:
+            user = await session.get(User, init.user.id)
+            if user is None:
+                return web.json_response({"error": "Сначала запустите бота"}, status=404)
+            try:
+                row = await games.spin_wheel(session, user=user, request_id=str(body.get("requestId") or ""))
+                await session.commit()
+            except EconomyError as exc:
+                await session.rollback()
+                return web.json_response({"error": exc.message}, status=400)
+        return web.json_response({"ok": True, "reward": {"kind": row.reward_kind, "amount": row.reward_amount}})
 
     async def api_device(self, request: web.Request) -> web.Response:
         ip = client_ip(request)
