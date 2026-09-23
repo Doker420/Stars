@@ -35,7 +35,8 @@ from app.services import tasks as task_service
 from app.services.app_settings import RuntimeSettingsStore
 from app.services.errors import EconomyError
 from app.services.events import DomainEvent
-from app.web.page import GAME_PAGE, LANDING_PAGE, VERIFY_PAGE
+from app.web.game import GAME_PAGE
+from app.web.page import LANDING_PAGE, VERIFY_PAGE
 
 log = structlog.get_logger("kodostars.web")
 
