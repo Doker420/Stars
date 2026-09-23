@@ -66,6 +66,7 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN risk_score INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN season_points INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN season_id TEXT",
+            "ALTER TABLE users ADD COLUMN telegram_is_premium INTEGER DEFAULT 0",
         ):
             try:
                 await db.execute(migration)
@@ -197,6 +198,44 @@ async def init_db():
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_events_name_created ON analytics_events(event_name, created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_case_openings_user_created ON case_openings(user_id, created_at)")
+
+        # Advertiser campaigns. The immutable rate locks campaign economics and
+        # prevents later setting changes from altering an already paid campaign.
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS campaigns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_user_id INTEGER NOT NULL,
+            campaign_uid TEXT UNIQUE NOT NULL,
+            task_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            target_url TEXT NOT NULL,
+            target_count INTEGER NOT NULL,
+            completed_count INTEGER DEFAULT 0,
+            rate_stars REAL NOT NULL,
+            budget_stars REAL NOT NULL,
+            premium_only INTEGER DEFAULT 0,
+            verification_mode TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            metadata TEXT DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (owner_user_id) REFERENCES users(id)
+        )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_campaign_owner_status ON campaigns(owner_user_id, status)")
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS campaign_completions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            proof TEXT,
+            completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE(campaign_id, user_id)
+        )
+        """)
 
         # 9. Settings table
         await db.execute("""

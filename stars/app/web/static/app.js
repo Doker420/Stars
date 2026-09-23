@@ -179,6 +179,7 @@ function extractTelegramUser() {
     let resolvedFirstName = null;
     let resolvedAvatar = null;
     let resolvedRef = null;
+    let resolvedIsPremium = null;
     let initDataRaw = '';
 
     const tg = window.Telegram?.WebApp;
@@ -196,6 +197,7 @@ function extractTelegramUser() {
             resolvedUsername = tgUser.username || null;
             resolvedFirstName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || null;
             resolvedAvatar = tgUser.photo_url || null;
+            resolvedIsPremium = typeof tgUser.is_premium === 'boolean' ? tgUser.is_premium : null;
         }
 
         if (tg.initData) {
@@ -243,7 +245,7 @@ function extractTelegramUser() {
     resolvedAvatar = resolvedAvatar || searchMap.avatar_url || searchMap.photo_url || hashMap.avatar_url || hashMap.photo_url;
     resolvedRef = resolvedRef || searchMap.ref || searchMap.start_param || hashMap.ref || hashMap.start_param;
 
-    return { resolvedTgId, resolvedUsername, resolvedFirstName, resolvedAvatar, resolvedRef, initDataRaw };
+    return { resolvedTgId, resolvedUsername, resolvedFirstName, resolvedAvatar, resolvedRef, resolvedIsPremium, initDataRaw };
 }
 
 async function initTelegramAndUser() {
@@ -253,6 +255,7 @@ async function initTelegramAndUser() {
     let resolvedFirstName = extracted.resolvedFirstName;
     let resolvedAvatar = extracted.resolvedAvatar;
     let resolvedRef = extracted.resolvedRef;
+    let resolvedIsPremium = extracted.resolvedIsPremium;
     let initDataRaw = extracted.initDataRaw;
 
     if (resolvedTgId) {
@@ -292,7 +295,8 @@ async function initTelegramAndUser() {
                 first_name: resolvedFirstName || 'Пользователь',
                 avatar_url: resolvedAvatar || null,
                 referrer_id: resolvedRef || null,
-                init_data: initDataRaw || null
+                init_data: initDataRaw || null,
+                is_premium: resolvedIsPremium
             })
         });
         const data = await res.json();

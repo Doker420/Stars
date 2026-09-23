@@ -80,6 +80,7 @@ class TelegramAuthRequest(BaseModel):
     avatar_url: str | None = None
     referrer_id: int | str | None = None
     init_data: str | None = None
+    is_premium: bool | None = None
 
 class CalculateRequest(BaseModel):
     type: str # 'stars' or 'premium'
@@ -146,9 +147,9 @@ async def auth_telegram_user(req: TelegramAuthRequest):
         """, (tg_id, clean_username, clean_first_name, avatar, ref_code, ref_by))
         
         await db.execute("""
-        UPDATE users SET username = ?, first_name = ?, avatar_url = COALESCE(?, avatar_url)
+        UPDATE users SET username = ?, first_name = ?, avatar_url = COALESCE(?, avatar_url), telegram_is_premium = COALESCE(?, telegram_is_premium)
         WHERE telegram_id = ?
-        """, (clean_username, clean_first_name, avatar, tg_id))
+        """, (clean_username, clean_first_name, avatar, int(req.is_premium) if req.is_premium is not None else None, tg_id))
         await db.commit()
         
         async with db.execute("SELECT id FROM users WHERE telegram_id = ?", (tg_id,)) as cur:

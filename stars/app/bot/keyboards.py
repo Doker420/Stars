@@ -42,9 +42,10 @@ def get_main_menu_keyboard(
             InlineKeyboardButton(text="🎁 Промокод", callback_data="menu_promo")
         ],
         [
-            InlineKeyboardButton(text="📜 Мои заказы", callback_data="menu_orders"),
-            InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/durov")
-        ]
+            InlineKeyboardButton(text="📣 Продвигать", callback_data="menu_promote"),
+            InlineKeyboardButton(text="📜 Мои заказы", callback_data="menu_orders")
+        ],
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/durov")]
     ]
     if is_admin:
         buttons.append([
@@ -52,6 +53,17 @@ def get_main_menu_keyboard(
             InlineKeyboardButton(text="🌐 Настройки сайта", callback_data="menu_site")
         ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_promotion_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Канал", callback_data="promo_format:channel_subscribe"), InlineKeyboardButton(text="🤖 Бот", callback_data="promo_format:bot_start")],
+        [InlineKeyboardButton(text="📝 Просмотр поста", callback_data="promo_format:post_view"), InlineKeyboardButton(text="👍 Реакция", callback_data="promo_format:post_reaction")],
+        [InlineKeyboardButton(text="📊 Голосование", callback_data="promo_format:poll_vote"), InlineKeyboardButton(text="💬 Комментарий", callback_data="promo_format:post_comment")],
+        [InlineKeyboardButton(text="👁 История", callback_data="promo_format:story_view"), InlineKeyboardButton(text="🔗 Своё задание", callback_data="promo_format:custom_link")],
+        [InlineKeyboardButton(text="💎 Premium-реакция", callback_data="promo_format:premium_reaction"), InlineKeyboardButton(text="🚀 Буст канала", callback_data="promo_format:channel_boost")],
+        [InlineKeyboardButton(text="🔙 Главное меню", callback_data="menu_back")],
+    ])
+
 
 def get_stars_packs_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[

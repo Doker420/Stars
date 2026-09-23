@@ -14,6 +14,7 @@ from app.web.routes_api import router as api_router
 from app.web.routes_admin import router as admin_router
 from app.web.routes_webhook import router as webhook_router, sync_pending_orders
 from app.web.routes_gamification import router as gamification_router
+from app.web.routes_campaigns import router as campaigns_router
 from app.bot.handlers import router as bot_router
 
 # Aiogram setup
@@ -70,7 +71,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="StarVault - Telegram Stars & Premium Store API",
-    version="3.1.0",
+    version="3.2.0",
     lifespan=lifespan
 )
 
@@ -102,6 +103,7 @@ app.include_router(api_router)
 app.include_router(admin_router)
 app.include_router(webhook_router)
 app.include_router(gamification_router)
+app.include_router(campaigns_router)
 
 @app.get("/")
 async def root_index():
@@ -117,7 +119,7 @@ async def root_index():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "app": "StarVault Store", "version": "3.1.0"}
+    return {"status": "ok", "app": "StarVault Store", "version": "3.2.0"}
 
 if __name__ == "__main__":
     uvicorn.run(

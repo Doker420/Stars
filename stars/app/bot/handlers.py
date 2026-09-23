@@ -15,6 +15,7 @@ from app.services.payments import PaymentService
 from app.services.security import log_audit
 from app.bot.keyboards import (
     get_main_menu_keyboard,
+    get_promotion_keyboard,
     get_stars_packs_keyboard,
     get_premium_plans_keyboard,
     get_order_payment_keyboard,
@@ -44,7 +45,7 @@ router = Router()
 # ==============================================================
 # Helper functions
 # ==============================================================
-async def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None, referrer_code: str = None) -> dict:
+async def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None, referrer_code: str = None, is_premium: bool | None = None) -> dict:
     clean_username = (username or f"user_{telegram_id}").lstrip("@")
     clean_first_name = first_name or clean_username
     ref_code = f"U{uuid.uuid4().hex[:6].upper()}"
@@ -64,8 +65,8 @@ async def get_or_create_user(telegram_id: int, username: str = None, first_name:
         """, (telegram_id, clean_username, clean_first_name, ref_code, referred_by, is_admin))
         
         await db.execute("""
-        UPDATE users SET username = ?, first_name = ? WHERE telegram_id = ?
-        """, (clean_username, clean_first_name, telegram_id))
+        UPDATE users SET username = ?, first_name = ?, telegram_is_premium = COALESCE(?, telegram_is_premium) WHERE telegram_id = ?
+        """, (clean_username, clean_first_name, int(is_premium) if is_premium is not None else None, telegram_id))
         await db.commit()
         
         async with db.execute("SELECT * FROM users WHERE telegram_id = ?", (telegram_id,)) as cur:
@@ -99,7 +100,8 @@ async def cmd_start(message: Message, state: FSMContext):
         telegram_id=message.from_user.id,
         username=message.from_user.username,
         first_name=message.from_user.first_name,
-        referrer_code=ref_code
+        referrer_code=ref_code,
+        is_premium=bool(getattr(message.from_user, "is_premium", False))
     )
     
     provider = await get_setting("active_provider", "mystars")
@@ -527,6 +529,46 @@ async def cb_menu_back(query: CallbackQuery, state: FSMContext):
         ),
         parse_mode="HTML"
     )
+
+@router.callback_query(F.data == "menu_promote")
+async def cb_menu_promote(query: CallbackQuery):
+    user = await get_or_create_user(query.from_user.id, query.from_user.username, query.from_user.first_name)
+    async with get_db() as db:
+        async with db.execute("SELECT COUNT(*) count FROM campaigns WHERE owner_user_id=? AND status='active'", (user["id"],)) as cur:
+            active = (await cur.fetchone())["count"]
+    text = (
+        "📣 <b>Продвижение за Telegram Stars</b>\n\n"
+        "Размести своё задание внутри бота — его увидят живые пользователи, которые зарабатывают здесь Stars.\n\n"
+        "<b>Доступные форматы:</b>\n"
+        "📢 Канал — подписка с проверкой через Telegram\n"
+        "🤖 Бот — запуск по deep-link\n"
+        "📝 Пост — просмотр публикации\n"
+        "👍 Реакция — обычная реакция на пост\n"
+        "📊 Опрос — голосование с авто- или ручной проверкой\n"
+        "💬 Комментарий — действие с модерацией\n"
+        "👁 История — просмотр Telegram Story\n"
+        "💎 Premium-реакция — только пользователи Telegram Premium\n"
+        "🚀 Буст канала — только пользователи Telegram Premium\n"
+        "🔗 Своё задание — любое действие по безопасной ссылке\n\n"
+        "Можно включить <b>таргет только на Premium-аудиторию</b> для любого формата.\n"
+        "Платишь только за выполнения: <b>цена = количество × ставка</b>.\n\n"
+        f"Твои активные кампании: <b>{active}</b> из 3."
+    )
+    await query.message.edit_text(text, reply_markup=get_promotion_keyboard(), parse_mode="HTML")
+    await query.answer()
+
+
+@router.callback_query(F.data.startswith("promo_format:"))
+async def cb_promotion_format(query: CallbackQuery):
+    format_id = query.data.split(":", 1)[1]
+    from app.web.routes_campaigns import FORMATS
+    item = FORMATS.get(format_id)
+    if not item:
+        await query.answer("Формат не найден", show_alert=True)
+        return
+    premium = "\n💎 Только Telegram Premium" if item.get("premium_required") else "\n🎯 Можно включить Premium-таргетинг (+25%)"
+    await query.answer(f"{item['title']}\nСтавка: {item['rate']:g} ⭐ за выполнение{premium}", show_alert=True)
+
 
 @router.callback_query(F.data == "menu_profile")
 async def cb_profile(query: CallbackQuery):
